@@ -41,11 +41,11 @@ class ChunkSampler(sampler.Sampler):
         return self.num_samples
     
 
-NUM_TRAIN = 64*1000
+NUM_TRAIN = 64*1
 NUM_VAL = 64*144
 
 latent_size = 16
-batch_size = 64
+batch_size = 4
 clip = 10
 
 
@@ -128,18 +128,15 @@ GTM_SM_model = GTM_SM(batch_size = batch_size)
 if torch.cuda.is_available():
     GTM_SM_model.cuda()  
 
-
-optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr)
+lr_list = np.linspace(1e-3, 5e-5, num = 50000)
+optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr_list[0])
 #optimizer = torch.optim.SGD(GTM_SM_model.parameters(), lr = lr, momentum=0.9)
 
 initNetParams(GTM_SM_model)
 
-lr_list = np.linspace(1e-3, 5e-5, num = 50000)
-
 updating_counter = 0
 
 def train(epoch):
-    global optimizer
     global updating_counter
     train_loss = 0
     for batch_idx, (data, _) in enumerate(loader_train):
@@ -151,16 +148,23 @@ def train(epoch):
         optimizer.zero_grad()
         kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model.forward(data)
         #GTM_SM_model.show_experiment_information(data, st_observation_list, st_prediction_list, xt_prediction_list, position)
-        loss = (nll_loss + kld_loss) / batch_size
+        loss = (nll_loss + kld_loss) 
         loss.backward()
+        
+        params=GTM_SM_model.state_dict() 
+        for k,v in params.items():
+            #if torch.sum(torch.isnan(v.grad)) != 0:
+            print(v.grad)
         
         #grad norm clipping, only in pytorch version >= 1.10
         nn.utils.clip_grad_norm_(GTM_SM_model.parameters(), clip)
         
         if updating_counter >= 50000:
-            optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr_list[-1])
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_list[-1]
         else:
-            optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr_list[updating_counter])
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_list[updating_counter]
         
         optimizer.step()
         

@@ -71,6 +71,7 @@ def sample():
         #transforming data  
         data = Variable(data, requires_grad = False).type(dtype)        
         #forward 
+        GTM_SM_model(data)
         st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model.Sampling(data)
         
         GTM_SM_model.show_experiment_information(data, st_observation_list, st_prediction_list, xt_prediction_list, position)
