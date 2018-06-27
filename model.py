@@ -51,10 +51,9 @@ def initialize_weights(m):
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     dtype = torch.cuda.FloatTensor
-    dbooltype = torch.cuda.ByteTensor
 else:
     dtype = torch.FloatTensor 
-    dbooltype = torch.ByteTensor       
+
 
 class GTM_SM(nn.Module):
     def __init__(self, x_dim = 8, a_dim = 5, s_dim = 2, z_dim = 16, observe_dim = 256, total_dim = 288, \
@@ -245,6 +244,7 @@ class GTM_SM(nn.Module):
             results.append(result)
         
         #calculate the kld
+        '''
         for index_sample in range(self.batch_size):
             for t in range(self.total_dim - self.observe_dim):
                 t_knn_index = results[index_sample][t]
@@ -260,7 +260,29 @@ class GTM_SM(nn.Module):
                 #print(log_p_theta_element_minus_log_q_phi)
                 p_theta = torch.exp(log_p_theta_element_minus_log_q_phi).matmul(normalized_wk)
                 kld_loss += - torch.mean(torch.log(p_theta))
-                
+        '''
+
+        for index_sample in range(self.batch_size):
+            for t in range(self.total_dim - self.observe_dim):
+                t_knn_index = results[index_sample][t]
+                t_knn_st_memory = st_observation_tensor[t_knn_index, index_sample]
+                dk2 = ((t_knn_st_memory - st_prediction_tensor[t, index_sample, :]) ** 2).sum(1)
+                wk = 1 / (dk2 + self.delta)
+                normalized_wk = wk / torch.sum(wk)
+                log_normalized_wk = torch.log(normalized_wk)
+
+                # sampling
+                zt_sampling = self._reparameterized_sample_cluster(zt_mean_prediction_tensor[t, index_sample],
+                                                                   zt_var_prediction_tensor[t, index_sample])
+                log_q_phi = self.log_gaussian_pdf(zt_sampling, zt_mean_prediction_tensor[t, index_sample],
+                                                  zt_var_prediction_tensor[t, index_sample])
+                log_p_theta_element = ((self.log_gaussian_element_pdf(zt_sampling, zt_mean_observation_tensor[t_knn_index, index_sample],
+                                                                                     zt_var_observation_tensor[t_knn_index, index_sample]).t()).t()) + log_normalized_wk
+                # print(log_p_theta_element_minus_log_q_phi)
+                (log_p_theta_element_max, _) = torch.max(log_p_theta_element, 1)
+                log_p_theta_element_nimus_max = (log_p_theta_element.t() - log_p_theta_element_max).t()
+                p_theta_nimus_max = torch.exp(log_p_theta_element_nimus_max).sum(1)
+                kld_loss +=  torch.mean(log_q_phi - log_p_theta_element_max - torch.log(p_theta_nimus_max))
 
 
         return kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position
