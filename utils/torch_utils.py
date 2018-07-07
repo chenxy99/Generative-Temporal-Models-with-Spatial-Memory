@@ -14,6 +14,9 @@ def initNetParams(net):
             init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 init.constant_(m.bias, 0)
+        elif isinstance(m, nn.BatchNorm1d):
+            init.constant_(m.weight, 1)
+            init.constant_(m.bias, 0)
         elif isinstance(m, nn.BatchNorm2d):
             init.constant_(m.weight, 1)
             init.constant_(m.bias, 0)

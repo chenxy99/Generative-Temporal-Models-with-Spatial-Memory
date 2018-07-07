@@ -88,15 +88,15 @@ def train(epoch):
         # printing
         if batch_idx % print_every == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\t KLD Loss: {:.6f} \t NLL Loss: {:.6f}'.format(
-                epoch, batch_idx * len(data), NUM_TRAIN,
-                       100. * batch_idx * len(data) / float(NUM_TRAIN),
-                       kld_loss / args.batch_size,
-                       nll_loss.item() / args.batch_size))
+                epoch, batch_idx * len(data), len(loader_train.dataset),
+                       100. * batch_idx * len(data) / len(loader_train.dataset),
+                       kld_loss / len(data),
+                       nll_loss.item() / len(data)))
 
         train_loss += loss.item()
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
-        epoch, train_loss / float(NUM_TRAIN)))
+        epoch, train_loss / len(loader_train.dataset)))
 
 
 n_epochs = 5000

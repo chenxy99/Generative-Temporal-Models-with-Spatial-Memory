@@ -13,6 +13,7 @@ import matplotlib.gridspec as gridspec
 
 from utils.torch_utils import initNetParams, ChunkSampler, show_images, device_agnostic_selection
 from config import *
+from roam import random_walk
 """implementation of the Generative Temporal Models 
 with Spatial Memory (GTM-SM) from https://arxiv.org/abs/1804.09401
 """
@@ -61,17 +62,23 @@ class GTM_SM(nn.Module):
         self.delta = delta
         self.kl_samples = kl_samples
         self.batch_size = batch_size
+        self.flanns = pyflann.FLANN()
 
         # feature-extracting transformations
         # encoder
         # for zt
-        self.enc_zt = nn.Sequential(nn.Conv2d(3, 8, kernel_size=3, stride=1),
+        self.enc_zt = nn.Sequential(nn.Conv2d(3, 16, kernel_size=2, stride=2),
                                     nn.ReLU(),
                                     nn.MaxPool2d(2),
+                                    nn.BatchNorm2d(16),
+                                    nn.Conv2d(16, 32, kernel_size=2, stride=2),
+                                    nn.ReLU(),
+                                    nn.BatchNorm2d(32),
                                     Flatten())
-        self.enc_zt_mean = nn.Sequential(nn.Linear(72, z_dim))
 
-        self.enc_zt_std = nn.Sequential(nn.Linear(72, z_dim),
+        self.enc_zt_mean = nn.Sequential(nn.Linear(32, z_dim))
+
+        self.enc_zt_std = nn.Sequential(nn.Linear(32, z_dim),
                                         Exponent())
 
         # for st
@@ -86,10 +93,18 @@ class GTM_SM(nn.Module):
 
         # decoder
         self.dec = nn.Sequential(
-            nn.Linear(z_dim, 72),
-            nn.Tanh(),
-            Unflatten(-1, 8, 3, 3),
-            nn.ConvTranspose2d(in_channels=8, out_channels=3, kernel_size=4, stride=2))
+            nn.Linear(z_dim, 64),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(64),
+            nn.Linear(64, 128),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(128),
+            Unflatten(-1, 32, 2, 2),
+            nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=3, stride=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(16),
+            nn.ConvTranspose2d(in_channels=16, out_channels=3, kernel_size=2, stride=2, padding=0),
+            nn.Sigmoid())
 
     def forward(self, x):
         if not self.training:
@@ -121,7 +136,7 @@ class GTM_SM(nn.Module):
 
         '''
 
-        action_one_hot_value, position, action_selection = self.random_walk()
+        action_one_hot_value, position, action_selection = random_walk(self)
         st_observation_list = []
         st_prediction_list = []
         zt_mean_observation_list = []
@@ -132,8 +147,6 @@ class GTM_SM(nn.Module):
 
         kld_loss = 0
         nll_loss = 0
-
-        flanns = pyflann.FLANN()
 
         # observation phase: construct st
         for t in range(self.observe_dim):
@@ -235,9 +248,9 @@ class GTM_SM(nn.Module):
 
         results = []
         for index_sample in range(self.batch_size):
-            param = flanns.build_index(st_observation_memory[:, index_sample, :], algorithm='kdtree',
+            param = self.flanns.build_index(st_observation_memory[:, index_sample, :], algorithm='kdtree',
                                                      trees=4)
-            result, _ = flanns.nn_index(st_prediction_memory[:, index_sample, :],
+            result, _ = self.flanns.nn_index(st_prediction_memory[:, index_sample, :],
                                                       self.k_nearest_neighbour, checks=param["checks"])
             results.append(result)
 
@@ -299,78 +312,6 @@ class GTM_SM(nn.Module):
             self.total_dim = origin_total_dim
 
         return kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position
-
-
-    def random_walk(self):
-        # construct position and action
-        action_one_hot_value_numpy = np.zeros((self.batch_size, self.a_dim, self.total_dim), np.float32)
-        position = np.zeros((self.batch_size, self.s_dim, self.total_dim), np.int32)
-        action_selection = np.zeros((self.batch_size, self.total_dim), np.int32)
-        for index_sample in range(self.batch_size):
-            new_continue_action_flag = True
-            for t in range(self.total_dim):
-                if t == 0:
-                    position[index_sample, :, t] = np.random.randint(0, 9, size=(2))
-                else:
-                    if new_continue_action_flag:
-                        new_continue_action_flag = False
-                        need_to_stop = False
-                        while 1:
-                            action_random_selection = np.random.randint(0, 4, size=(1))
-                            if not (action_random_selection ==0 and position[index_sample, 1, t - 1] == 8):
-                                if not (action_random_selection ==1 and position[index_sample, 1, t - 1] == 0):
-                                    if not (action_random_selection ==2 and position[index_sample, 0, t - 1] == 0):
-                                        if not (action_random_selection ==3 and position[index_sample, 0, t - 1] == 8):
-                                            break
-                        action_duriation = np.random.poisson(2, 1)
-
-                    if action_duriation > 0 and not need_to_stop:
-                        if action_random_selection == 0:
-                            if position[index_sample, 1, t - 1] == 8:
-                                need_to_stop = True
-                                position[index_sample, :, t] = position[index_sample, :, t - 1]
-                                action_selection[index_sample, t] = 4
-                            else:
-                                position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([0, 1])
-                                action_selection[index_sample, t] = action_random_selection
-                        elif action_random_selection == 1:
-                            if position[index_sample, 1, t - 1] == 0:
-                                need_to_stop = True
-                                position[index_sample, :, t] = position[index_sample, :, t - 1]
-                                action_selection[index_sample, t] = 4
-                            else:
-                                position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([0, -1])
-                                action_selection[index_sample, t] = action_random_selection
-                        elif action_random_selection == 2:
-                            if position[index_sample, 0, t - 1] == 0:
-                                need_to_stop = True
-                                position[index_sample, :, t] = position[index_sample, :, t - 1]
-                                action_selection[index_sample, t] = 4
-                            else:
-                                position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([-1, 0])
-                                action_selection[index_sample, t] = action_random_selection
-                        else:
-                            if position[index_sample, 0, t - 1] == 8:
-                                need_to_stop = True
-                                position[index_sample, :, t] = position[index_sample, :, t - 1]
-                                action_selection[index_sample, t] = 4
-                            else:
-                                position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([1, 0])
-                                action_selection[index_sample, t] = action_random_selection
-                    else:
-                        action_selection[index_sample, t] = 4
-                        position[index_sample, :, t] = position[index_sample, :, t - 1]
-                    action_duriation -= 1
-                    if action_duriation <= 0:
-                        new_continue_action_flag = True
-
-        for index_sample in range(self.batch_size):
-            action_one_hot_value_numpy[
-                index_sample, action_selection[index_sample], np.array(range(self.total_dim))] = 1
-
-        action_one_hot_value = torch.from_numpy(action_one_hot_value_numpy).to(device=device)
-
-        return action_one_hot_value, position, action_selection
 
     def _log_gaussian_pdf(self, zt, zt_mean, zt_std):
         constant_value = torch.tensor(2 * 3.1415926535, device = device)
