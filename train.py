@@ -17,6 +17,7 @@ import matplotlib.gridspec as gridspec
 from utils.torch_utils import initNetParams, ChunkSampler, show_images, device_agnostic_selection
 from model import GTM_SM
 from config import *
+from show_results import show_experiment_information
 
 plt.rcParams['figure.figsize'] = (10.0, 8.0)  # set default size of plots
 plt.rcParams['image.interpolation'] = 'nearest'
@@ -45,6 +46,7 @@ optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr_list[0])
 
 initNetParams(GTM_SM_model)
 
+
 updating_counter = 0
 
 def train(epoch):
@@ -61,7 +63,8 @@ def train(epoch):
         kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model.forward(training_data)
 
         if epoch == 10:
-            GTM_SM_model.show_experiment_information(data, st_observation_list, st_prediction_list, xt_prediction_list, position)
+            show_experiment_information(GTM_SM_model, data, st_observation_list, st_prediction_list, xt_prediction_list,
+                                        position)
 
         loss = (nll_loss + kld_loss)
         #loss = nll_loss
