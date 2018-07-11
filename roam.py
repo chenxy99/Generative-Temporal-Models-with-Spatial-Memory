@@ -11,18 +11,22 @@ def random_walk(model):
         new_continue_action_flag = True
         for t in range(model.total_dim):
             if t == 0:
-                position[index_sample, :, t] = np.random.randint(0, 9, size=(2))
+                #position[index_sample, :, t] = np.random.randint(0, 9, size=(2))
+                position[index_sample, :, t] = np.ones(2) * 4
             else:
                 if new_continue_action_flag:
                     new_continue_action_flag = False
                     need_to_stop = False
+
                     while 1:
-                        action_random_selection = np.random.randint(0, 4, size=(1))
+                        action_random_selection = np.random.randint(0, 5, size=(1))
                         if not (action_random_selection == 0 and position[index_sample, 1, t - 1] == 8):
                             if not (action_random_selection == 1 and position[index_sample, 1, t - 1] == 0):
                                 if not (action_random_selection == 2 and position[index_sample, 0, t - 1] == 0):
                                     if not (action_random_selection == 3 and position[index_sample, 0, t - 1] == 8):
                                         break
+
+                    #action_random_selection = np.random.randint(0, 5, size=(1))
                     action_duriation = np.random.poisson(2, 1)
 
                 if action_duriation > 0 and not need_to_stop:
@@ -30,34 +34,30 @@ def random_walk(model):
                         if position[index_sample, 1, t - 1] == 8:
                             need_to_stop = True
                             position[index_sample, :, t] = position[index_sample, :, t - 1]
-                            action_selection[index_sample, t] = 4
                         else:
                             position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([0, 1])
-                            action_selection[index_sample, t] = action_random_selection
+                        action_selection[index_sample, t] = action_random_selection
                     elif action_random_selection == 1:
                         if position[index_sample, 1, t - 1] == 0:
                             need_to_stop = True
                             position[index_sample, :, t] = position[index_sample, :, t - 1]
-                            action_selection[index_sample, t] = 4
                         else:
                             position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([0, -1])
-                            action_selection[index_sample, t] = action_random_selection
+                        action_selection[index_sample, t] = action_random_selection
                     elif action_random_selection == 2:
                         if position[index_sample, 0, t - 1] == 0:
                             need_to_stop = True
                             position[index_sample, :, t] = position[index_sample, :, t - 1]
-                            action_selection[index_sample, t] = 4
                         else:
                             position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([-1, 0])
-                            action_selection[index_sample, t] = action_random_selection
+                        action_selection[index_sample, t] = action_random_selection
                     else:
                         if position[index_sample, 0, t - 1] == 8:
                             need_to_stop = True
                             position[index_sample, :, t] = position[index_sample, :, t - 1]
-                            action_selection[index_sample, t] = 4
                         else:
                             position[index_sample, :, t] = position[index_sample, :, t - 1] + np.array([1, 0])
-                            action_selection[index_sample, t] = action_random_selection
+                        action_selection[index_sample, t] = action_random_selection
                 else:
                     action_selection[index_sample, t] = 4
                     position[index_sample, :, t] = position[index_sample, :, t - 1]

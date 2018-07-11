@@ -27,12 +27,12 @@ data_transform = T.Compose([
         T.Resize((32, 32)),
         T.ToTensor(),
     ])
-MTFL_testing_dataset = dset.ImageFolder(root='./datasets/MTFL_data/testing',
+testing_dataset = dset.ImageFolder(root='./datasets/CelebA/testing',
                                            transform=data_transform)
-loader_val = DataLoader(MTFL_testing_dataset, batch_size=args.batch_size, shuffle=True)
+loader_val = DataLoader(testing_dataset, batch_size=args.batch_size, shuffle=True)
 
 
-state_dict = torch.load('saves/GTM_SM_state_dict_1.pth')
+state_dict = torch.load('saves/GTM_SM_state_dict_232.pth')
 GTM_SM_model = GTM_SM(batch_size = args.batch_size)
 GTM_SM_model.load_state_dict(state_dict)
 GTM_SM_model.to(device=device)
@@ -45,7 +45,7 @@ def sample():
             #transforming data
             training_data = data.to(device=device)
             #forward
-            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model(data)
+            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model(training_data)
 
             show_experiment_information(GTM_SM_model, data, st_observation_list, st_prediction_list, xt_prediction_list, position)
 

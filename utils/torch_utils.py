@@ -4,6 +4,7 @@ import torch.nn.init as init
 from torch.utils.data import sampler
 import argparse
 
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
