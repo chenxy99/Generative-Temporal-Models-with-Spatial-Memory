@@ -18,6 +18,16 @@ Instructions of python files.
   Use for setting the parameters of the model, such as the batch_size, total epochs, log interval and so on.
 - `main.py`
   Use for trian our GTM-SM model, it calls for the functions -- `train` and `test` to train our model and feedback the reconstructon error from validation set.
+- `train.py`
+  Use for implementation of the `train` and `test` function.
+- `Roam.py`
+  Use for genetating the trajectory of the 8 x 8 crop.
+- `show_results.py`
+  Use for generating the result as the `videos/image_navigation` shows.
+- `sample.py`
+  Use for generating image navigation experiment figure. It can be directly called to producing the corresponding result.
+- `/utils/torch_utils.py`
+  Provide some usefull funtions.
 
 ### Contact
-To ask questions or report issues, please open an issue on the [issues tracker](https://github.com/cbfinn/maml/issues).
+To ask questions or report issues, please open an issue on the [issues tracker](https://github.com/chenxy99/Generative-Temporal-Models-with-Spatial-Memory/issues).
