@@ -23,44 +23,8 @@ from model import GTM_SM
 from config import *
 from show_results import show_experiment_information
 
-plt.rcParams['figure.figsize'] = (10.0, 8.0)  # set default size of plots
-plt.rcParams['image.interpolation'] = 'nearest'
-plt.rcParams['image.cmap'] = 'gray'
-
-data_transform = T.Compose([
-        T.Resize((32, 32)),
-        T.ToTensor(),
-    ])
-training_dataset = dset.ImageFolder(root='./datasets/CelebA/training',
-                                           transform=data_transform)
-loader_train = DataLoader(training_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-
-val_dataset = dset.ImageFolder(root='./datasets/CelebA/val',
-                                           transform=data_transform)
-loader_val = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-
-#imgs = loader_train.__iter__().next()[0].view(args.batch_size, 3, 32, 32)
-#show_images(imgs)
-
-GTM_SM_model = GTM_SM(batch_size = args.batch_size, total_dim=256+32).to(device=device)
-
-lr_list = np.linspace(1e-3, 5e-5, num=50000)
-
-optimizer = optim.Adam(GTM_SM_model.parameters(), lr=lr_list[0])
-# optimizer = torch.optim.SGD(GTM_SM_model.parameters(), lr = lr, momentum=0.9)
-
-initNetParams(GTM_SM_model)
-
-updating_counter = 0
-
-train_loss_arr = np.zeros((args.epochs))
-train_kld_loss_arr = np.zeros((args.epochs))
-train_nll_loss_arr = np.zeros((args.epochs))
-test_nll_loss_arr = np.zeros((args.epochs))
-
-def train(epoch):
-    global updating_counter
-    GTM_SM_model.train()
+def train(epoch, model, optimizer, loader_train, lr_list, train_loss_arr, train_kld_loss_arr, train_nll_loss_arr, updating_counter):
+    model.train()
     train_loss = 0
     train_kld_loss = 0
     train_nll_loss = 0
@@ -71,10 +35,11 @@ def train(epoch):
 
         # forward + backward + optimize
         optimizer.zero_grad()
-        kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model.forward(training_data)
+        kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(training_data)
 
-        loss = (nll_loss + kld_loss)
+        loss = nll_loss.item() + kld_loss.item()
         loss_to_optimize = (nll_loss + kld_loss) / args.batch_size
+        #loss_to_optimize = nll_loss + kld_loss
         loss_to_optimize.backward()
 
         # grad norm clipping, only in pytorch version >= 1.10
@@ -98,7 +63,7 @@ def train(epoch):
                        kld_loss.item() / len(data),
                        nll_loss.item() / len(data)))
 
-        train_loss += loss.item()
+        train_loss += loss
         train_kld_loss += nll_loss.item()
         train_nll_loss += kld_loss.item()
 
@@ -109,35 +74,19 @@ def train(epoch):
     print('====> Epoch: {} Average loss: {:.4f}'.format(
         epoch, train_loss / len(loader_train.dataset)))
 
+    return updating_counter
 
-def test(epoch):
-    GTM_SM_model.eval()
+
+def test(epoch, model, loader_val, test_nll_loss_arr):
+    model.eval()
     test_loss = 0
     with torch.no_grad():
         for i, (data, _) in enumerate(loader_val):
             data = data.to(device=device)
-            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model.forward(
+            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
                 data)
             test_loss += nll_loss
 
     test_loss /= len(loader_val.dataset)
     test_nll_loss_arr[epoch - 1] = test_loss
     print('====> Test set loss: {:.4f}'.format(test_loss))
-
-if __name__ == '__main__':
-    #imgs = loader_train.__iter__().next()[0].view(args.batch_size, 3, 32, 32)
-    #show_images(imgs)
-    for epoch in range(1, args.epochs + 1):
-        # training + testing
-        train(epoch)
-        test(epoch)
-        # saving model
-        if (epoch - 1) % args.save_interval == 0:
-            fn = 'saves/gtm_sm_state_dict_' + str(epoch) + '.pth'
-            torch.save(GTM_SM_model.state_dict(), fn)
-            print('Saved model to ' + fn)
-
-    root = os.getcwd()
-    folder_name = "result_folder"
-    os.chdir(os.path.join(root, folder_name))
-    np.savez("result.npz", train_loss_arr=train_loss_arr, train_kld_loss_arr=train_kld_loss_arr, train_nll_loss_arr=train_nll_loss_arr, val_nll_loss_arr=val_nll_loss_arr)

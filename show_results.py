@@ -34,7 +34,7 @@ def show_experiment_information(model, x, st_observation_list, st_prediction_lis
     plt.ion()
 
     # observation phase
-    for t in range(240, model.observe_dim):
+    for t in range(0, model.observe_dim):
         position_h_t = np.asscalar(position[sample_id, 0, t])
         position_w_t = np.asscalar(position[sample_id, 1, t])
         sample_imgs_t = np.copy(sample_imgs.cpu().detach().numpy())

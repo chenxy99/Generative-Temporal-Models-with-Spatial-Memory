@@ -31,11 +31,14 @@ testing_dataset = dset.ImageFolder(root='./datasets/CelebA/testing',
                                            transform=data_transform)
 loader_val = DataLoader(testing_dataset, batch_size=args.batch_size, shuffle=True)
 
-
-state_dict = torch.load('saves/GTM_SM_state_dict_232.pth')
+if torch.cuda.is_available():
+    state_dict = torch.load('saves/GTM_SM_state_dict.pth')
+else:
+    state_dict = torch.load('saves/GTM_SM_state_dict.pth', map_location=lambda storage, loc: storage)
 GTM_SM_model = GTM_SM(batch_size = args.batch_size)
 GTM_SM_model.load_state_dict(state_dict)
 GTM_SM_model.to(device=device)
+
 
 def sample():
     GTM_SM_model.eval()

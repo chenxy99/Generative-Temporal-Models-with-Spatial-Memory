@@ -3,14 +3,14 @@ import argparse
 
 parser = argparse.ArgumentParser(description='GTM-SM Example')
 parser.add_argument('--batch-size', type=int, default=16, metavar='N',
-                    help='input batch size for training (default: 32)')
-parser.add_argument('--epochs', type=int, default=2000, metavar='N',
+                    help='input batch size for training (default: 16)')
+parser.add_argument('--epochs', type=int, default=20000, metavar='N',
                     help='number of epochs to train (default: 2000)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                     help='how many batches to wait before logging training status (default: 10)')
 parser.add_argument('--save-interval', type=int, default=1, metavar='N',
                     help='how many epochs to wait before saving model status (default: 1)')

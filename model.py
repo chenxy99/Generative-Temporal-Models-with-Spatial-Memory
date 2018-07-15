@@ -58,7 +58,7 @@ class Unflatten(nn.Module):
 
 class GTM_SM(nn.Module):
     def __init__(self, x_dim=8, a_dim=5, s_dim=2, z_dim=16, observe_dim=256, total_dim=288, \
-                 r_std=0.001, k_nearest_neighbour=5, delta=0.0001, kl_samples=256, batch_size=1):
+                 r_std=0.001, k_nearest_neighbour=5, delta=0.0001, kl_samples=1000, batch_size=1):
         super(GTM_SM, self).__init__()
 
         self.x_dim = x_dim
@@ -81,15 +81,18 @@ class GTM_SM(nn.Module):
         # for zt
         self.enc_zt = nn.Sequential(
             Preprocess_img(),
-            Flatten(),
-            nn.Linear(192, 512),
-            nn.Tanh())
+            nn.Conv2d(3, 8, kernel_size=2, stride=2),
+            nn.LeakyReLU(0.01),
+            nn.Conv2d(8, 16, kernel_size=2, stride=2),
+            nn.LeakyReLU(0.01),
+            Flatten()
+        )
 
         self.enc_zt_mean = nn.Sequential(
-            nn.Linear(512, z_dim))
+            nn.Linear(64, z_dim))
 
         self.enc_zt_std = nn.Sequential(
-            nn.Linear(512, z_dim),
+            nn.Linear(64, z_dim),
             Exponent())
 
         # for st
@@ -97,18 +100,20 @@ class GTM_SM(nn.Module):
             nn.Linear(a_dim, s_dim, bias=False))
 
         self.enc_st_sigmoid = nn.Sequential(
-            nn.Linear(s_dim, 10),
-            nn.Tanh(),
-            nn.Linear(10, s_dim),
+            nn.Linear(s_dim, 5),
+            nn.ReLU(),
+            nn.Linear(5, 1),
             nn.Sigmoid())
 
         # decoder
         self.dec = nn.Sequential(
-            nn.Linear(z_dim, 512),
+            nn.Linear(z_dim, 64),
+            nn.ReLU(),
+            Unflatten(-1, 16, 2, 2),
+            nn.ConvTranspose2d(in_channels=16, out_channels=8, kernel_size=2, stride=2),
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=8, out_channels=3, kernel_size=2, stride=2),
             nn.Tanh(),
-            nn.Linear(512, 192),
-            nn.Tanh(),
-            Unflatten(-1, 3, 8, 8),
             Deprocess_img())
         '''
 
@@ -211,7 +216,7 @@ class GTM_SM(nn.Module):
             if t == 0:
                 st_observation_t = torch.zeros(self.batch_size, self.s_dim, device=device)#torch.rand(self.batch_size, self.s_dim, device=device) - 1
             else:
-                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t])
+                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t - 1])
                 st_observation_t = st_observation_list[t - 1] + replacement * \
                                    self.enc_st_sigmoid(st_observation_list[t - 1] + replacement) + \
                                    torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
@@ -222,12 +227,12 @@ class GTM_SM(nn.Module):
         # prediction phase: construct st
         for t in range(self.total_dim - self.observe_dim):
             if t == 0:
-                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim])
+                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim - 1])
                 st_prediction_t = st_observation_list[-1] + replacement * \
                                   self.enc_st_sigmoid(st_observation_list[-1] + replacement) + \
                                   torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
             else:
-                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim])
+                replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim - 1])
                 st_prediction_t = st_prediction_list[t - 1] + replacement * \
                                   self.enc_st_sigmoid(st_prediction_list[t - 1] + replacement) + \
                                   torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
@@ -285,7 +290,7 @@ class GTM_SM(nn.Module):
                     position_h_t = position[index_sample, 0, t + self.observe_dim]
                     position_w_t = position[index_sample, 1, t + self.observe_dim]
                     index_mask[index_sample, :, 3 * position_h_t:3 * position_h_t + 8,
-                    3 * position_w_t:3 * position_w_t + 8] = torch.ones([1], device=device)
+                    3 * position_w_t:3 * position_w_t + 8] = 1
                 index_mask_bool = index_mask.ge(0.5)
                 x_ground_true_t = torch.masked_select(x, index_mask_bool).view(-1, 3, 8, 8)
                 x_resconstruct_t = self.dec(zt_prediction_sample)
@@ -333,7 +338,6 @@ class GTM_SM(nn.Module):
         else:
             xt_prediction_tensor = torch.zeros(self.total_dim - self.observe_dim, self.batch_size, 3, 8, 8,
                                                device=device)
-
             for index_sample in range(self.batch_size):
                 knn_index = results[index_sample]
                 knn_index_vec = np.reshape(knn_index, (self.k_nearest_neighbour * (self.total_dim - self.observe_dim)))
@@ -360,7 +364,7 @@ class GTM_SM(nn.Module):
                     position_h_t = position[index_sample, 0, t + self.observe_dim]
                     position_w_t = position[index_sample, 1, t + self.observe_dim]
                     index_mask[index_sample, :, 3 * position_h_t:3 * position_h_t + 8,
-                    3 * position_w_t:3 * position_w_t + 8] = torch.ones([1], device=device)
+                    3 * position_w_t:3 * position_w_t + 8] = 1
                 index_mask_bool = index_mask.ge(0.5)
                 x_ground_true_t = torch.masked_select(x, index_mask_bool).view(-1, 3, 8, 8)
                 nll_loss += self._nll_gauss(xt_prediction_tensor[t], x_ground_true_t)
