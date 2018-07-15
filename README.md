@@ -3,14 +3,17 @@
 This repo contains code accompaning the paper, 	[Generative Temporal Models with Spatial Memory
 for Partially Observed Environments (Marco Fraccaro et al.)](https://arxiv.org/abs/1804.09401). It includes code for running the image navigation experiment.
 
+
 ### Dependencies
 This code requires the following:
 * python 2.\* or python 3.\*
 * pytorch v0.4.0
 * pyflann v1.6.14
 
+
 ### Data
-For the Multi-Task Facial Landmark (MTFL) data, download from (http://mmlab.ie.cuhk.edu.hk/projects/TCDCN/data/MTFL.zip). Extract 2560  files from `./MTFL/AFLW` to `./datasets/MTFL_data/training` and extract other 432  files from `./MTFL/AFLW` to `./datasets/MTFL_data/testing`.
+For the Large-scale CelebFaces Attributes (CelebA) Dataset, download from (http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html). In this experiment, the preprocess about face detector is required. So I save the preprocess result in `./datasets/CelebA.zip`. Readers can unzip this into `./datasets/`.
+
 
 ### Usage
 Instructions of python files.
@@ -28,6 +31,11 @@ Instructions of python files.
   Use for generating image navigation experiment figure. It can be directly called to producing the corresponding result.
 - `/utils/torch_utils.py`
   Provide some usefull funtions.
+  
+I have saved the trained parameters in `./saves/`, and the file `sample.py` would reload these parameters to do the image navigation.
+
+If readers would like to check the result, you can directly run the file `sample.py`. For convenience, I recode the relevant videos in `videos/image_navigation/`.
+
 
 ### Contact
 To ask questions or report issues, please open an issue on the [issues tracker](https://github.com/chenxy99/Generative-Temporal-Models-with-Spatial-Memory/issues).
