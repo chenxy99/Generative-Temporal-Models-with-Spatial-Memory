@@ -31,14 +31,14 @@ testing_dataset = dset.ImageFolder(root='./datasets/CelebA/testing',
                                            transform=data_transform)
 loader_val = DataLoader(testing_dataset, batch_size=args.batch_size, shuffle=True)
 
+path_to_load = 'saves/GTM_SM_state_dict.pth'
 if torch.cuda.is_available():
-    state_dict = torch.load('saves/GTM_SM_state_dict.pth')
+    state_dict = torch.load(path_to_load)
 else:
-    state_dict = torch.load('saves/GTM_SM_state_dict.pth', map_location=lambda storage, loc: storage)
+    state_dict = torch.load(path_to_load, map_location=lambda storage, loc: storage)
 GTM_SM_model = GTM_SM(batch_size = args.batch_size)
 GTM_SM_model.load_state_dict(state_dict)
 GTM_SM_model.to(device=device)
-
 
 def sample():
     GTM_SM_model.eval()
@@ -48,7 +48,7 @@ def sample():
             #transforming data
             training_data = data.to(device=device)
             #forward
-            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model(training_data)
+            kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = GTM_SM_model(training_data)
 
             show_experiment_information(GTM_SM_model, data, st_observation_list, st_prediction_list, xt_prediction_list, position)
 

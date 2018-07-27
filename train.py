@@ -18,75 +18,132 @@ import matplotlib.gridspec as gridspec
 
 from multiprocessing import Process
 
-from utils.torch_utils import initNetParams, ChunkSampler, show_images, device_agnostic_selection
+from utils.torch_utils import initNetParams, ChunkSampler, show_images, device_agnostic_selection, show_heatmap
 from model import GTM_SM
 from config import *
 from show_results import show_experiment_information
+from roam import sample_position
 
-def train(epoch, model, optimizer, loader_train, lr_list, train_loss_arr, train_kld_loss_arr, train_nll_loss_arr, updating_counter):
+def train(epoch, model, optimizer, loader_train):
     model.train()
+    BCE_loss = nn.BCELoss()
+
     train_loss = 0
-    train_kld_loss = 0
-    train_nll_loss = 0
+    bce_loss = 0
+    wo_wall_end_epoch = 10
+    wo_wall_and_penalty_end_epoch =  15
+
     for batch_idx, (data, _) in enumerate(loader_train):
 
-        # transforming data
-        training_data = data.to(device=device)
+        if epoch < wo_wall_end_epoch:
+            if epoch == 1 and batch_idx == 0:
+                optimizer.__init__(
+                    [{'params': model.enc_zt.parameters()},
+                     {'params': model.enc_zt_mean.parameters()},
+                     {'params': model.enc_zt_std.parameters()},
+                     {'params': model.enc_st_matrix.parameters()},
+                     {'params': model.dec.parameters()},
+                     {'params': model.enc_st_sigmoid.parameters(), 'lr': 1e-2}],
+                    lr=1e-3)
 
-        # forward + backward + optimize
-        optimizer.zero_grad()
-        kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(training_data)
+            # transforming data
+            training_data = data.to(device=device)
 
-        loss = nll_loss.item() + kld_loss.item()
-        loss_to_optimize = (nll_loss + kld_loss) / args.batch_size
-        #loss_to_optimize = nll_loss + kld_loss
-        loss_to_optimize.backward()
+            # forward + backward + optimize
+            optimizer.zero_grad()
+            kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
+                training_data)
+
+            train_loss += (nll_loss + kld_loss).item()
+            loss_to_optimize = (nll_loss + kld_loss) / args.batch_size
+            loss_to_optimize.backward()
+
+        elif epoch >= wo_wall_end_epoch and epoch < wo_wall_and_penalty_end_epoch:
+            if epoch == wo_wall_end_epoch and batch_idx == 0:
+                optimizer.__init__( [{'params': model.enc_zt.parameters()},
+                     {'params': model.enc_zt_mean.parameters()},
+                     {'params': model.enc_zt_std.parameters()},
+                     {'params': model.enc_st_matrix.parameters()},
+                     {'params': model.dec.parameters()},
+                     {'params': model.enc_st_sigmoid.parameters(), 'lr': 1e-2}],
+                    lr=1e-3)
+
+            # transforming data
+            training_data = data.to(device=device)
+
+            # forward + backward + optimize
+            optimizer.zero_grad()
+            kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
+                training_data)
+
+            train_loss += (nll_loss + kld_loss).item()
+            loss_to_optimize = (nll_loss + kld_loss) / args.batch_size + matrix_loss
+            loss_to_optimize.backward()
+
+        else:
+            if epoch == wo_wall_and_penalty_end_epoch and batch_idx == 0:
+                model.training_wo_wall = False
+                model.training_sigmoid = True
+                optimizer.__init__(
+                    [{'params': model.enc_zt.parameters()},
+                     {'params': model.enc_zt_mean.parameters()},
+                     {'params': model.enc_zt_std.parameters()},
+                     {'params': model.enc_st_matrix.parameters()},
+                     {'params': model.dec.parameters()},
+                     {'params': model.enc_st_sigmoid.parameters(), 'lr': 1e-2}],
+                    lr=5e-4)
+
+            # transforming data
+            training_data = data.to(device=device)
+
+            # forward + backward + optimize
+            optimizer.zero_grad()
+            kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
+                training_data)
+            X_train, Y_train = sample_position(model)
+            bce_loss = BCE_loss(model._enc_st_sigmoid_forward(X_train), Y_train)
+
+            train_loss += (nll_loss + kld_loss).item()
+            loss_to_optimize = (nll_loss + kld_loss) / args.batch_size + matrix_loss + model.lambda_for_sigmoid * bce_loss
+            loss_to_optimize.backward()
 
         # grad norm clipping, only in pytorch version >= 1.10
         #nn.utils.clip_grad_norm_(GTM_SM_model.parameters(), args.gradient_clip)
 
-        if updating_counter >= 50000:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr_list[-1]
-        else:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr_list[updating_counter]
-
         optimizer.step()
-        updating_counter += 1
 
         # printing
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\t KLD Loss: {:.6f} \t NLL Loss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(loader_train.dataset),
-                       100. * batch_idx * len(data) / len(loader_train.dataset),
-                       kld_loss.item() / len(data),
-                       nll_loss.item() / len(data)))
-
-        train_loss += loss
-        train_kld_loss += nll_loss.item()
-        train_nll_loss += kld_loss.item()
-
-    train_loss_arr[epoch - 1] = train_loss / len(loader_train.dataset)
-    train_kld_loss_arr[epoch - 1] = train_kld_loss / len(loader_train.dataset)
-    train_nll_loss_arr[epoch - 1] = train_nll_loss / len(loader_train.dataset)
+        if epoch < wo_wall_and_penalty_end_epoch :
+            if batch_idx % args.log_interval == 0:
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\t KLD Loss: {:.6f} \t NLL Loss: {:.6f} \t MATRIX Lose: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(loader_train.dataset),
+                           100. * batch_idx * len(data) / len(loader_train.dataset),
+                           kld_loss.item() / len(data),
+                           nll_loss.item() / len(data),
+                           matrix_loss.item()))
+        else:
+            if batch_idx % args.log_interval == 0:
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\t KLD Loss: {:.6f} \t NLL Loss: {:.6f} \t MATRIX Lose: {:.6f} \t Sigmoid Lose: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(loader_train.dataset),
+                           100. * batch_idx * len(data) / len(loader_train.dataset),
+                           kld_loss.item() / len(data),
+                           nll_loss.item() / len(data),
+                           matrix_loss.item(),
+                           bce_loss.item()))
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
         epoch, train_loss / len(loader_train.dataset)))
 
-    return updating_counter
 
-
-def test(epoch, model, loader_val, test_nll_loss_arr):
+def test(epoch, model, loader_val):
     model.eval()
     test_loss = 0
     with torch.no_grad():
         for i, (data, _) in enumerate(loader_val):
             data = data.to(device=device)
-            kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
+            kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position = model.forward(
                 data)
             test_loss += nll_loss
 
     test_loss /= len(loader_val.dataset)
-    test_nll_loss_arr[epoch - 1] = test_loss
     print('====> Test set loss: {:.4f}'.format(test_loss))

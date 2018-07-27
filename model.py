@@ -14,7 +14,7 @@ import matplotlib.gridspec as gridspec
 
 from utils.torch_utils import initNetParams, ChunkSampler, show_images, device_agnostic_selection
 from config import *
-from roam import random_walk
+from roam import random_walk, random_walk_wo_wall
 """implementation of the Generative Temporal Models 
 with Spatial Memory (GTM-SM) from https://arxiv.org/abs/1804.09401
 """
@@ -58,7 +58,9 @@ class Unflatten(nn.Module):
 
 class GTM_SM(nn.Module):
     def __init__(self, x_dim=8, a_dim=5, s_dim=2, z_dim=16, observe_dim=256, total_dim=288, \
-                 r_std=0.001, k_nearest_neighbour=5, delta=0.0001, kl_samples=1000, batch_size=1):
+                 r_std=0.001, k_nearest_neighbour=5, delta=0.0001, kl_samples=1000, batch_size=1, \
+                 lambda_for_mat_orth=1000, lambda_for_mat_mag=1000, lambda_for_sigmoid = 10000, \
+                 training_wo_wall = True, training_sigmoid = False):
         super(GTM_SM, self).__init__()
 
         self.x_dim = x_dim
@@ -73,17 +75,22 @@ class GTM_SM(nn.Module):
         self.delta = delta
         self.kl_samples = kl_samples
         self.batch_size = batch_size
+        self.lambda_for_mat_orth = lambda_for_mat_orth
+        self.lambda_for_mat_mag = lambda_for_mat_mag
+        self.lambda_for_sigmoid = lambda_for_sigmoid
+        self.training_wo_wall = training_wo_wall
+        self.training_sigmoid = training_sigmoid
+
         self.flanns = pyflann.FLANN()
 
         # feature-extracting transformations
-
         # encoder
         # for zt
         self.enc_zt = nn.Sequential(
             Preprocess_img(),
-            nn.Conv2d(3, 8, kernel_size=2, stride=2),
+            nn.Conv2d(3, 64, kernel_size=2, stride=2),
             nn.LeakyReLU(0.01),
-            nn.Conv2d(8, 16, kernel_size=2, stride=2),
+            nn.Conv2d(64, 16, kernel_size=2, stride=2),
             nn.LeakyReLU(0.01),
             Flatten()
         )
@@ -100,7 +107,9 @@ class GTM_SM(nn.Module):
             nn.Linear(a_dim, s_dim, bias=False))
 
         self.enc_st_sigmoid = nn.Sequential(
-            nn.Linear(s_dim, 5),
+            nn.Linear(s_dim, 10),
+            nn.ReLU(),
+            nn.Linear(10, 5),
             nn.ReLU(),
             nn.Linear(5, 1),
             nn.Sigmoid())
@@ -110,61 +119,11 @@ class GTM_SM(nn.Module):
             nn.Linear(z_dim, 64),
             nn.ReLU(),
             Unflatten(-1, 16, 2, 2),
-            nn.ConvTranspose2d(in_channels=16, out_channels=8, kernel_size=2, stride=2),
+            nn.ConvTranspose2d(in_channels=16, out_channels=64, kernel_size=2, stride=2),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=8, out_channels=3, kernel_size=2, stride=2),
+            nn.ConvTranspose2d(in_channels=64, out_channels=3, kernel_size=2, stride=2),
             nn.Tanh(),
             Deprocess_img())
-        '''
-
-        # encoder
-        # for zt
-        self.enc_zt = nn.Sequential(
-            Preprocess_img(),
-            nn.Conv2d(3, 8, kernel_size=2, stride=2),
-            nn.LeakyReLU(0.01),
-            nn.MaxPool2d(2),
-            nn.Conv2d(8, 16, kernel_size=2, stride=1),
-            nn.LeakyReLU(0.01),
-            Flatten())
-
-        self.enc_zt_mean = nn.Sequential(
-            nn.Linear(16, 32),
-            nn.LeakyReLU(0.01),
-            nn.Linear(32, z_dim))
-
-        self.enc_zt_std = nn.Sequential(
-            nn.Linear(16, 32),
-            nn.LeakyReLU(0.01),
-            nn.Linear(32, z_dim),
-            Exponent())
-
-        # for st
-        self.enc_st_matrix = nn.Sequential(
-            nn.Linear(a_dim, s_dim, bias=False))
-
-        self.enc_st_sigmoid = nn.Sequential(
-            nn.Linear(s_dim, 10),
-            nn.Tanh(),
-            nn.Linear(10, s_dim),
-            nn.Sigmoid())
-
-        # decoder
-        self.dec = nn.Sequential(
-            nn.Linear(z_dim, 32),
-            nn.ReLU(),
-            nn.BatchNorm1d(32),
-            nn.Linear(32, 32 * 2 *2),
-            nn.ReLU(),
-            nn.BatchNorm1d(32 * 2 *2),
-            Unflatten(-1, 32, 2, 2),
-            nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=3, stride=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.BatchNorm2d(16),
-            nn.ConvTranspose2d(in_channels=16, out_channels=3, kernel_size=2, stride=2),
-            nn.Tanh(),
-            Deprocess_img())
-        '''
 
     def forward(self, x):
         if not self.training:
@@ -198,8 +157,11 @@ class GTM_SM(nn.Module):
         xt_ground_true_tensor       tensor      (self.total_dim - self.observe_dim, self.batch_size, self.x_dim)
 
         '''
+        if self.training_wo_wall:
+            action_one_hot_value, position, action_selection = random_walk_wo_wall(self)
+        else:
+            action_one_hot_value, position, action_selection = random_walk(self)
 
-        action_one_hot_value, position, action_selection = random_walk(self)
         st_observation_list = []
         st_prediction_list = []
         zt_mean_observation_list = []
@@ -217,9 +179,13 @@ class GTM_SM(nn.Module):
                 st_observation_t = torch.zeros(self.batch_size, self.s_dim, device=device)#torch.rand(self.batch_size, self.s_dim, device=device) - 1
             else:
                 replacement = self.enc_st_matrix(action_one_hot_value[:, :, t - 1])
-                st_observation_t = st_observation_list[t - 1] + replacement * \
-                                   self.enc_st_sigmoid(st_observation_list[t - 1] + replacement) + \
-                                   torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                if not self.training_sigmoid:
+                    st_observation_t = st_observation_list[t - 1] + replacement + \
+                                       torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                else:
+                    st_observation_t = st_observation_list[t - 1] + replacement * \
+                                       self.enc_st_sigmoid(st_observation_list[t - 1] + replacement) + \
+                                       torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
             st_observation_list.append(st_observation_t)
         st_observation_tensor = torch.cat(st_observation_list, 0).view(self.observe_dim, self.batch_size, self.s_dim)
 
@@ -228,14 +194,24 @@ class GTM_SM(nn.Module):
         for t in range(self.total_dim - self.observe_dim):
             if t == 0:
                 replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim - 1])
-                st_prediction_t = st_observation_list[-1] + replacement * \
-                                  self.enc_st_sigmoid(st_observation_list[-1] + replacement) + \
-                                  torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                if not self.training_sigmoid:
+                    st_prediction_t = st_observation_list[-1] + replacement + \
+                                      torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                else:
+                    st_prediction_t = st_observation_list[-1] + replacement * \
+                                      self.enc_st_sigmoid(st_observation_list[-1] + replacement) + \
+                                      torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+
             else:
                 replacement = self.enc_st_matrix(action_one_hot_value[:, :, t + self.observe_dim - 1])
-                st_prediction_t = st_prediction_list[t - 1] + replacement * \
-                                  self.enc_st_sigmoid(st_prediction_list[t - 1] + replacement) + \
-                                  torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                if not self.training_sigmoid:
+                    st_prediction_t = st_prediction_list[t - 1] + replacement + \
+                                      torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+                else:
+                    st_prediction_t = st_prediction_list[t - 1] + replacement * \
+                                      self.enc_st_sigmoid(st_prediction_list[t - 1] + replacement) + \
+                                      torch.randn((self.batch_size, self.s_dim), device=device) * self.r_std
+
             st_prediction_list.append(st_prediction_t)
         st_prediction_tensor = torch.cat(st_prediction_list, 0).view(self.total_dim - self.observe_dim, self.batch_size,
                                                                      self.s_dim)
@@ -350,7 +326,7 @@ class GTM_SM(nn.Module):
                 normalized_wk = (wk.t() / torch.sum(wk, 1)).t()
                 cumsum_normalized_wk = torch.cumsum(normalized_wk, dim=1)
                 rand_sample_value = torch.rand((self.total_dim - self.observe_dim, 1), device=device)
-                bool_index_list = cumsum_normalized_wk <= rand_sample_value
+                bool_index_list = cumsum_normalized_wk + torch.tensor(1e-7).to(device=device) <= rand_sample_value
                 knn_sample_index = bool_index_list.sum(1)
                 zt_sampling = self._reparameterized_sample(
                     zt_mean_observation_tensor[knn_index[range(self.total_dim - self.observe_dim), knn_sample_index], index_sample],
@@ -377,7 +353,9 @@ class GTM_SM(nn.Module):
         if not self.training:
             self.total_dim = origin_total_dim
 
-        return kld_loss, nll_loss, st_observation_list, st_prediction_list, xt_prediction_list, position
+        matrix_loss = self._matrix_loss()
+
+        return kld_loss, nll_loss, matrix_loss, st_observation_list, st_prediction_list, xt_prediction_list, position
 
     def _log_gaussian_pdf(self, zt, zt_mean, zt_std):
         constant_value = torch.tensor(2 * 3.1415926535, device = device)
@@ -425,3 +403,15 @@ class GTM_SM(nn.Module):
     def _nll_gauss(self, x, mean):
         # n, _ = x.size()
         return torch.sum((x - mean) ** 2)
+
+    def _matrix_loss(self):
+        # n, _ = x.size()
+        for param in self.enc_st_matrix.parameters():
+            matrix_loss = self.lambda_for_mat_orth * torch.sum(torch.sum(param[:, 0:1] * param[:, 2:3], 0) ** 2)
+        for index in range(4):
+            matrix_loss += self.lambda_for_mat_mag * (torch.norm(param[:, index]) - 1.5/8) ** 2
+        return matrix_loss
+
+    def _enc_st_sigmoid_forward(self, X_train):
+        Y_predict = self.enc_st_sigmoid(X_train)
+        return Y_predict
